@@ -1,11 +1,14 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 import yt_dlp
 import requests
 import re
 from urllib.parse import quote
 
 app = FastAPI()
+
+# GUIDE: Please place your 'cookies.txt' file in the root directory for authentication to work.
+# This prevents "Sign in to confirm you’re not a bot" errors.
 
 @app.get("/health")
 async def health_check():
@@ -18,14 +21,19 @@ async def download(url: str, format: str = "mp4"):
     if not url:
         raise HTTPException(status_code=400, detail="Missing URL")
 
-    try:
-        # Configuration for yt-dlp
-        ydl_opts = {
-            'format': 'best' if format == 'mp4' else 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-        }
+    # Configuration for yt-dlp with Cookie and User-Agent spoofing
+    ydl_opts = {
+        'format': 'best' if format == 'mp4' else 'bestaudio/best',
+        'quiet': True,
+        'no_warnings': True,
+        'cookiefile': 'cookies.txt',  # Required for authentication
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'referer': 'https://www.youtube.com/',
+        'nocheckcertificate': True,
+        'ignoreerrors': False,
+    }
 
+    try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             print("[INFO] Fetching video metadata...")
             info = ydl.extract_info(url, download=False)
@@ -34,7 +42,11 @@ async def download(url: str, format: str = "mp4"):
             clean_title = re.sub(r'[<>:"/\\|?*]', '', title).strip()
             filename = f"{clean_title}.{format}"
             
-            download_url = info['url']
+            download_url = info.get('url')
+            
+            if not download_url:
+                 raise Exception("Could not retrieve download URL.")
+
             print(f"[INFO] Video found: {title}")
             print(f"[INFO] Download URL: {download_url}")
 
@@ -49,7 +61,6 @@ async def download(url: str, format: str = "mp4"):
                     print(f"[ERROR] Stream error: {e}")
 
             # Headers for browser download
-            # Content-Disposition with filename* for UTF-8 support
             headers = {
                 'Content-Disposition': f"attachment; filename*=UTF-8''{quote(filename)}",
                 'Content-Type': 'video/mp4' if format == 'mp4' else 'audio/mpeg'
@@ -57,8 +68,14 @@ async def download(url: str, format: str = "mp4"):
 
             return StreamingResponse(iterfile(), headers=headers)
 
+    except (yt_dlp.utils.DownloadError, yt_dlp.utils.ExtractorError) as e:
+        print(f"[ERROR] YouTube Bot Detection/Download Error: {e}")
+        return JSONResponse(
+            status_code=403,
+            content={"error": "YouTube Bot Detection: Please check server logs and ensure 'cookies.txt' is valid."}
+        )
     except Exception as e:
-        print(f"[ERROR] {e}")
+        print(f"[ERROR] General Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
@@ -66,5 +83,6 @@ if __name__ == "__main__":
     print("\n==================================================")
     print("🚀 YouTube Downloader Server Running (Python)")
     print("📡 URL: http://localhost:3000")
+    print("🍪 Ensure 'cookies.txt' is present for authentication")
     print("==================================================\n")
     uvicorn.run(app, host="0.0.0.0", port=3000)
