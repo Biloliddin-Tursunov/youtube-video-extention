@@ -7,6 +7,10 @@ from urllib.parse import quote
 
 app = FastAPI()
 
+@app.get("/health")
+async def health_check():
+    return {"status": "active"}
+
 @app.get("/download")
 async def download(url: str, format: str = "mp4"):
     print(f"[REQUEST] Download Request: {url} ({format})")
